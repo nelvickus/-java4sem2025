@@ -1,0 +1,257 @@
+
+import .awt.*;
+import java.awt.event.*;
+import javax.swing.*;
+import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import javax.script.ScriptEngineManager;
+import javax.script.ScriptEngine;
+import javax.script.ScriptException;
+
+// Model
+class CalculatorModel {
+    private List<String> history;
+    private static final String HISTORY_FILE = "calculator_history.txt";
+
+    public CalculatorModel() {
+        history = new ArrayList<>();
+        loadHistory();
+    }
+
+    public double calculate(String expression) {
+        try {
+            // Заменяем ** на ^ для совместимости с ScriptEngine
+            expression = expression.replace("**", "^");
+
+            // Используем ScriptEngine для вычисления выражения
+            ScriptEngineManager manager = new ScriptEngineManager();
+            ScriptEngine engine = manager.getEngineByName("JavaScript");
+            Object result = engine.eval(expression);
+
+            if (result instanceof Number) {
+                return ((Number) result).doubleValue();
+            } else {
+                throw new IllegalArgumentException("Invalid expression");
+            }
+
+        } catch (ScriptException e) {
+            throw new IllegalArgumentException("Invalid expression: " + e.getMessage());
+        }
+    }
+
+
+    public void addToHistory(String expression, double result) {
+        history.add(expression + " = " + result);
+        saveHistory();
+    }
+
+    public List<String> getHistory() {
+        return history;
+    }
+
+    private void loadHistory() {
+        try (BufferedReader reader = new BufferedReader(new FileReader(HISTORY_FILE))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                history.add(line);
+            }
+        } catch (IOException e) {
+            // Ignore if file doesn't exist
+        }
+    }
+
+    private void saveHistory() {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(HISTORY_FILE))) {
+            for (String line : history) {
+                writer.write(line);
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(null, "Error saving history: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    public void saveHistoryToFile(String filePath, List<Integer> selectedIndices) {
+        File file = new File(filePath);
+        String absolutePath = file.getAbsolutePath();
+
+        // Determine the filename and path
+        String filename;
+        String directory;
+
+        if (filePath == null || filePath.trim().isEmpty()) {
+            // If user doesn't specify a path, show where the current file is
+            JOptionPane.showMessageDialog(null, "No file name specified. Current history file is located at:\n" +
+                    new File(HISTORY_FILE).getAbsolutePath(), "Info", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        if (filePath.contains(File.separator)) {
+            // User specified a path
+            file = new File(filePath); // use the entered filepath for file creation
+            directory = file.getParent();
+            filename = file.getName();
+
+            //Check extension
+            if (filename.contains(".")) {
+                String extension = filename.substring(filename.lastIndexOf('.') + 1);
+                if (!extension.equalsIgnoreCase("txt") && !extension.equalsIgnoreCase("log") && !extension.equalsIgnoreCase("md")) {
+                    JOptionPane.showMessageDialog(null, "Warning: The specified file extension is not valid.\nAllowed extensions: .txt, .log, .md", "Warning", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        } else {
+            filename = "log.log"; // default name
+            directory = new File("").getAbsolutePath(); // same directory as program
+            file = new File(directory + File.separator + filename); // Use directory for creating the file
+        }
+
+        if(directory == null){
+            directory = new File("").getAbsolutePath();
+            file = new File(directory + File.separator + filename);
+        }
+
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+            for (int index : selectedIndices) {
+                writer.write(history.get(index));
+                writer.newLine();
+            }
+            JOptionPane.showMessageDialog(null, "History saved to file:\n" + file.getAbsolutePath(), "Success", JOptionPane.INFORMATION_MESSAGE);
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(null, "Error saving history to file: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+}
+
+// View
+class CalculatorView extends JFrame {
+    private JTextField expressionField;
+    private JTextArea historyArea;
+    private JButton calculateButton;
+    private JButton saveToFileButton;
+    private JList<String> historyList;
+    private DefaultListModel<String> historyListModel;
+    private JFileChooser fileChooser;
+
+    public CalculatorView() {
+        setTitle("Calculator");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(600, 400);
+        setLayout(new BorderLayout());
+
+        expressionField = new JTextField();
+        calculateButton = new JButton("Calculate");
+        saveToFileButton = new JButton("Save Selected to File");
+        historyArea = new JTextArea();
+        historyArea.setEditable(false);
+        historyListModel = new DefaultListModel<>();
+        historyList = new JList<>(historyListModel);
+        fileChooser = new JFileChooser();
+
+        JPanel inputPanel = new JPanel(new BorderLayout());
+        inputPanel.add(expressionField, BorderLayout.CENTER);
+        inputPanel.add(calculateButton, BorderLayout.EAST);
+
+        JPanel historyPanel = new JPanel(new BorderLayout());
+        historyPanel.add(new JScrollPane(historyList), BorderLayout.CENTER);
+        historyPanel.add(saveToFileButton, BorderLayout.SOUTH);
+
+        add(inputPanel, BorderLayout.NORTH);
+        add(historyPanel, BorderLayout.CENTER);
+
+        setVisible(true);
+    }
+
+    public String getExpression() {
+        return expressionField.getText();
+    }
+
+    public void setHistory(List<String> history) {
+        historyListModel.clear();
+        for (String item : history) {
+            historyListModel.addElement(item);
+        }
+    }
+
+    public List<Integer> getSelectedHistoryIndices() {
+        return historyList.getSelectedValuesList().stream().map(historyListModel::indexOf).toList();
+    }
+
+    public String getSaveFilePath() {
+        String filePath = JOptionPane.showInputDialog(this, "Enter file name to save history to:");
+        return filePath;
+    }
+
+
+    public void addCalculateListener(ActionListener listener) {
+        calculateButton.addActionListener(listener);
+    }
+
+    public void addSaveToFileListener(ActionListener listener) {
+        saveToFileButton.addActionListener(listener);
+    }
+
+    public void displayErrorMessage(String message) {
+        JOptionPane.showMessageDialog(this, message, "Error", JOptionPane.ERROR_MESSAGE);
+    }
+}
+
+// Controller
+class CalculatorController {
+    private CalculatorModel model;
+    private CalculatorView view;
+
+    public CalculatorController(CalculatorModel model, CalculatorView view) {
+        this.model = model;
+        this.view = view;
+
+        view.addCalculateListener(new CalculateListener());
+        view.addSaveToFileListener(new SaveToFileListener());
+        updateView();
+    }
+
+    private void updateView() {
+        view.setHistory(model.getHistory());
+    }
+
+    class CalculateListener implements ActionListener {
+        @Override
+        public void actionPerformed(ActionEvent e) {
+            String expression = view.getExpression();
+            try {
+                double result = model.calculate(expression);
+                model.addToHistory(expression, result);
+                updateView();
+            } catch (IllegalArgumentException ex) {
+                view.displayErrorMessage(ex.getMessage());
+            }
+        }
+    }
+
+    class SaveToFileListener implements ActionListener {
+        @Override
+        public void actionPerformed(ActionEvent e) {
+            String filePath = view.getSaveFilePath();
+            List<Integer> selectedIndices = view.getSelectedHistoryIndices();
+
+            if (filePath != null) {
+                model.saveHistoryToFile(filePath, selectedIndices);
+            } else {
+                // User cancelled the file selection.
+            }
+        }
+    }
+}
+
+
+public class Calculator {
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            CalculatorModel model = new CalculatorModel();
+            CalculatorView view = new CalculatorView();
+            new CalculatorController(model, view);
+        });
+    }
+}
