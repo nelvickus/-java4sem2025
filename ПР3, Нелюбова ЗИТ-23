@@ -1,0 +1,972 @@
+import .io.*;
+import java.text.DateFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.List;
+import java.util.regex.Pattern;
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import com.itextpdf.kernel.pdf.PdfDocument;
+import com.itextpdf.kernel.pdf.PdfWriter;
+import com.itextpdf.layout.Document;
+import com.itextpdf.layout.element.Paragraph;
+
+public class VotingSystem {
+
+    private static final String USERS_FILE = "users.txt";
+    private static final String CIKS_FILE = "ciks.txt";
+    private static final String CANDIDATES_FILE = "candidates.txt";
+    private static final String VOTINGS_FILE = "votings.txt";
+    private static final String RESULTS_FILE = "results.txt";
+
+    private static List<User> users = new ArrayList<>();
+    private static List<CIK> ciks = new ArrayList<>();
+    private static List<Candidate> candidates = new ArrayList<>();
+    private static List<Voting> votings = new ArrayList<>();
+    private static Map<Integer, Map<Integer, Integer>> results = new HashMap<>(); // VotingID -> (CandidateID -> Votes)
+
+
+    public static void main(String[] args) {
+        loadData();
+        SwingUtilities.invokeLater(() -> new LoginView());
+    }
+
+    private static void loadData() {
+        users = loadUsers();
+        ciks = loadCIKs();
+        candidates = loadCandidates();
+        votings = loadVotings();
+        results = loadResults();
+    }
+
+    private static void saveData() {
+        saveUsers(users);
+        saveCIKs(ciks);
+        saveCandidates(candidates);
+        saveVotings(votings);
+        saveResults(results);
+    }
+
+    // ========================== Data Loading/Saving ==========================
+
+    private static List<User> loadUsers() {
+       List<User> loadedUsers = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new FileReader(USERS_FILE))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length == 6) {
+                    int id = Integer.parseInt(parts[0]);
+                    String role = parts[1];
+                    String fullName = parts[2];
+                    String birthDateStr = parts[3];
+                    String snils = parts[4];
+                    String password = parts[5];
+
+                    // Parse the birthdate
+                    DateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+                    Date birthDate;
+                    try {
+                        birthDate = df.parse(birthDateStr);
+                    } catch (ParseException e) {
+                        System.err.println("Error parsing birthdate for user ID " + id + ": " + e.getMessage());
+                        continue; // Skip this user if the date is invalid
+                    }
+                     loadedUsers.add(new User(id, role, fullName, birthDate, snils, password));
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error loading users: " + e.getMessage());
+        }
+        return loadedUsers;
+    }
+
+
+    private static void saveUsers(List<User> users) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(USERS_FILE))) {
+            for (User user : users) {
+               DateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+               String birthDateStr = df.format(user.getBirthDate());
+                writer.write(user.getId() + "," + user.getRole() + "," + user.getFullName() + "," + birthDateStr + "," + user.getSnils() + "," + user.getPassword());
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving users: " + e.getMessage());
+        }
+    }
+
+    private static List<CIK> loadCIKs() {
+        List<CIK> loadedCIKs = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new FileReader(CIKS_FILE))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length == 3) {
+                    int id = Integer.parseInt(parts[0]);
+                    String login = parts[1];
+                    String password = parts[2];
+                    loadedCIKs.add(new CIK(id, login, password));
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error loading CIKs: " + e.getMessage());
+        }
+        return loadedCIKs;
+    }
+
+    private static void saveCIKs(List<CIK> ciks) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(CIKS_FILE))) {
+            for (CIK cik : ciks) {
+                writer.write(cik.getId() + "," + cik.getLogin() + "," + cik.getPassword());
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving CIKs: " + e.getMessage());
+        }
+    }
+
+    private static List<Candidate> loadCandidates() {
+        List<Candidate> loadedCandidates = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new FileReader(CANDIDATES_FILE))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length == 3) {
+                    int id = Integer.parseInt(parts[0]);
+                    String login = parts[1];
+                    String password = parts[2];
+                    loadedCandidates.add(new Candidate(id, login, password));
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error loading candidates: " + e.getMessage());
+        }
+        return loadedCandidates;
+    }
+
+    private static void saveCandidates(List<Candidate> candidates) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(CANDIDATES_FILE))) {
+            for (Candidate candidate : candidates) {
+                writer.write(candidate.getId() + "," + candidate.getLogin() + "," + candidate.getPassword());
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving candidates: " + e.getMessage());
+        }
+    }
+   private static List<Voting> loadVotings() {
+      List<Voting> loadedVotings = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new FileReader(VOTINGS_FILE))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length >= 4) {
+                    try {
+                        int votingId = Integer.parseInt(parts[0]);
+                        String description = parts[1];
+                        String endDateStr = parts[2];
+
+                        DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                        Date endDate = df.parse(endDateStr);
+
+                        List<Integer> candidateIds = new ArrayList<>();
+                        for (int i = 3; i < parts.length; i++) {
+                            candidateIds.add(Integer.parseInt(parts[i]));
+                        }
+
+                        loadedVotings.add(new Voting(votingId, description, endDate, candidateIds));
+                    } catch (NumberFormatException | ParseException e) {
+                        System.err.println("Error parsing voting data: " + e.getMessage());
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error loading votings: " + e.getMessage());
+        }
+        return loadedVotings;
+    }
+
+
+   private static void saveVotings(List<Voting> votings) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(VOTINGS_FILE))) {
+            for (Voting voting : votings) {
+                DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                String endDateStr = df.format(voting.getEndDate());
+
+                StringBuilder sb = new StringBuilder();
+                sb.append(voting.getId()).append(",")
+                  .append(voting.getDescription()).append(",")
+                  .append(endDateStr);
+
+                for (int candidateId : voting.getCandidateIds()) {
+                    sb.append(",").append(candidateId);
+                }
+
+                writer.write(sb.toString());
+                writer.newLine();
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving votings: " + e.getMessage());
+        }
+    }
+
+
+    private static Map<Integer, Map<Integer, Integer>> loadResults() {
+         Map<Integer, Map<Integer, Integer>> loadedResults = new HashMap<>();
+        try (BufferedReader reader = new BufferedReader(new FileReader(RESULTS_FILE))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length == 3) {
+                    try {
+                        int votingId = Integer.parseInt(parts[0]);
+                        int candidateId = Integer.parseInt(parts[1]);
+                        int votes = Integer.parseInt(parts[2]);
+
+                        loadedResults.computeIfAbsent(votingId, k -> new HashMap<>()).put(candidateId, votes);
+                    } catch (NumberFormatException e) {
+                        System.err.println("Error parsing result data: " + e.getMessage());
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error loading results: " + e.getMessage());
+        }
+        return loadedResults;
+    }
+
+
+   private static void saveResults(Map<Integer, Map<Integer, Integer>> results) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(RESULTS_FILE))) {
+            for (Map.Entry<Integer, Map<Integer, Integer>> votingEntry : results.entrySet()) {
+                int votingId = votingEntry.getKey();
+                Map<Integer, Integer> candidateVotes = votingEntry.getValue();
+
+                for (Map.Entry<Integer, Integer> candidateEntry : candidateVotes.entrySet()) {
+                    int candidateId = candidateEntry.getKey();
+                    int votes = candidateEntry.getValue();
+                    writer.write(votingId + "," + candidateId + "," + votes);
+                    writer.newLine();
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving results: " + e.getMessage());
+        }
+    }
+
+
+    // ========================== Authentication ==========================
+
+    private static User authenticate(String login, String password) {
+        for (User user : users) {
+            if (user.getFullName().equals(login) && user.getPassword().equals(password)) { //Using fullname as login. Change it if other logic is needed.
+                return user;
+            }
+        }
+        for (CIK cik : ciks) {
+            if (cik.getLogin().equals(login) && cik.getPassword().equals(password)) {
+                return new User(cik.getId(), "CIK", "CIK_" + cik.getId(), new Date(), "", password); //Fake user for CIK
+            }
+        }
+        for (Candidate candidate : candidates) {
+            if (candidate.getLogin().equals(login) && candidate.getPassword().equals(password)) {
+                return new User(candidate.getId(), "Candidate", "Candidate_" + candidate.getId(), new Date(), "", password);  //Fake user for Candidate
+            }
+        }
+        return null;
+    }
+
+    // ========================== UI Components ==========================
+
+   static class LoginView extends JFrame {
+        private JTextField loginField;
+        private JPasswordField passwordField;
+        private JButton loginButton;
+        private JButton registerButton;
+
+        public LoginView() {
+            setTitle("Login");
+            setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            setSize(300, 200);
+            setLayout(new GridLayout(4, 2));
+
+            loginField = new JTextField();
+            passwordField = new JPasswordField();
+            loginButton = new JButton("Login");
+            registerButton = new JButton("Register");
+
+            add(new JLabel("Login:"));
+            add(loginField);
+            add(new JLabel("Password:"));
+            add(passwordField);
+            add(loginButton);
+            add(registerButton);
+
+            loginButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    String login = loginField.getText();
+                    String password = new String(passwordField.getPassword());
+                    User user = authenticate(login, password);
+
+                    if (user != null) {
+                        JOptionPane.showMessageDialog(LoginView.this, "Login successful!");
+                        dispose();
+                        openRoleBasedMenu(user);
+                    } else {
+                        JOptionPane.showMessageDialog(LoginView.this, "Invalid login credentials.", "Login Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
+
+            registerButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    dispose();
+                    new RegistrationView().setVisible(true);
+                }
+            });
+
+            setVisible(true);
+            setLocationRelativeTo(null);  // Center the window
+        }
+    }
+
+    static class RegistrationView extends JFrame {
+        private JTextField fullNameField, snilsField;
+        private JPasswordField passwordField;
+        private JFormattedTextField birthDateField;
+        private JButton registerButton;
+
+        public RegistrationView() {
+            setTitle("Registration");
+            setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+            setSize(400, 300);
+            setLayout(new GridLayout(6, 2));
+
+
+            fullNameField = new JTextField();
+            passwordField = new JPasswordField();
+            snilsField = new JTextField();
+            birthDateField = new JFormattedTextField(createFormatter("####-##-##")); // YYYY-MM-DD
+
+            registerButton = new JButton("Register");
+
+
+            add(new JLabel("Full Name:"));
+            add(fullNameField);
+            add(new JLabel("Birth Date (YYYY-MM-DD):"));
+            add(birthDateField);
+            add(new JLabel("SNILS:"));
+            add(snilsField);
+            add(new JLabel("Password:"));
+            add(passwordField);
+            add(registerButton);
+
+            registerButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    try {
+                        String fullName = fullNameField.getText();
+                        String birthDateStr = birthDateField.getText();
+                        String snils = snilsField.getText();
+                        String password = new String(passwordField.getPassword());
+
+                         DateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+                         Date birthDate = df.parse(birthDateStr);
+
+                         if(fullName.isEmpty() || snils.isEmpty() || password.isEmpty()){
+                                throw new IllegalArgumentException("All fields are required");
+                         }
+
+                         if (!isValidSNILS(snils)) {
+                            throw new IllegalArgumentException("Invalid SNILS format.");
+                         }
+
+                        User newUser = new User(generateUniqueId(users), "User", fullName, birthDate, snils, password);
+                        users.add(newUser);
+                        saveData();
+
+                        JOptionPane.showMessageDialog(RegistrationView.this, "Registration successful!");
+                        dispose();
+                        new LoginView().setVisible(true); // Return to login
+                    }
+                     catch (ParseException ex) {
+                        JOptionPane.showMessageDialog(RegistrationView.this, "Invalid date format. Use YYYY-MM-DD.", "Registration Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                    catch (IllegalArgumentException ex) {
+                        JOptionPane.showMessageDialog(RegistrationView.this, ex.getMessage(), "Registration Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
+
+             setVisible(true);
+            setLocationRelativeTo(null);
+        }
+
+        private MaskFormatter createFormatter(String s) {
+            MaskFormatter formatter = null;
+            try {
+                formatter = new MaskFormatter(s);
+                formatter.setPlaceholderCharacter('_');
+            } catch (java.text.ParseException exc) {
+                System.err.println("formatter is bad: " + exc.getMessage());
+                System.exit(-1);
+            }
+            return formatter;
+        }
+
+        private boolean isValidSNILS(String snils) {
+            return Pattern.matches("\\d{3}-\\d{3}-\\d{3} \\d{2}", snils); // Basic format check
+        }
+    }
+
+
+    // ========================== Role-Based Menus ==========================
+
+    private static void openRoleBasedMenu(User user) {
+        switch (user.getRole()) {
+            case "Admin":
+                SwingUtilities.invokeLater(() -> new AdminMenuView(user));
+                break;
+            case "CIK":
+                SwingUtilities.invokeLater(() -> new CIKMenuView(user));
+                break;
+            case "Candidate":
+                SwingUtilities.invokeLater(() -> new CandidateMenuView(user));
+                break;
+            case "User":
+                SwingUtilities.invokeLater(() -> new UserMenuView(user));
+                break;
+            default:
+                JOptionPane.showMessageDialog(null, "Unknown role.");
+        }
+    }
+
+    // ========================== Menu Views ==========================
+
+   static class AdminMenuView extends JFrame {
+        private User admin;
+
+        public AdminMenuView(User admin) {
+            this.admin = admin;
+            setTitle("Admin Menu");
+            setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            setSize(400, 300);
+            setLayout(new GridLayout(4, 1));
+
+            JButton manageUsersButton = new JButton("Manage Users");
+            JButton manageCIKsButton = new JButton("Manage CIKs");
+            JButton manageCandidatesButton = new JButton("Manage Candidates");
+            JButton logoutButton = new JButton("Logout");
+
+            add(manageUsersButton);
+            add(manageCIKsButton);
+            add(manageCandidatesButton);
+            add(logoutButton);
+
+            manageUsersButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    openManageUsersView();
+                }
+            });
+
+            manageCIKsButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                   openManageCIKsView();
+                }
+            });
+
+            manageCandidatesButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                   openManageCandidatesView();
+                }
+            });
+
+            logoutButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    dispose();
+                    new LoginView().setVisible(true);
+                }
+            });
+
+            setVisible(true);
+            setLocationRelativeTo(null);
+        }
+
+
+        private void openManageUsersView() {
+            JFrame frame = new JFrame("Manage Users");
+            frame.setSize(600, 400);
+            frame.setLayout(new BorderLayout());
+
+            DefaultListModel<String> userListModel = new DefaultListModel<>();
+            JList<String> userList = new JList<>(userListModel);
+
+            for (User user : users) {
+                userListModel.addElement(user.getFullName());
+            }
+
+            JButton deleteUserButton = new JButton("Delete User");
+
+            deleteUserButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    int selectedIndex = userList.getSelectedIndex();
+                    if (selectedIndex >= 0) {
+                        users.remove(selectedIndex);
+                        userListModel.remove(selectedIndex);
+                        saveData();
+                    } else {
+                        JOptionPane.showMessageDialog(frame, "Please select a user to delete.", "Selection Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
+
+
+            JPanel buttonPanel = new JPanel();
+            buttonPanel.add(deleteUserButton);
+
+
+            frame.add(new JScrollPane(userList), BorderLayout.CENTER);
+            frame.add(buttonPanel, BorderLayout.SOUTH);
+
+            frame.setVisible(true);
+        }
+
+
+      private void openManageCIKsView() {
+            JFrame frame = new JFrame("Manage CIKs");
+            frame.setSize(600, 400);
+            frame.setLayout(new BorderLayout());
+
+            DefaultListModel<String> cikListModel = new DefaultListModel<>();
+            JList<String> cikList = new JList<>(cikListModel);
+
+            for (CIK cik : ciks) {
+                cikListModel.addElement(cik.getLogin());
+            }
+
+            JButton createCIKButton = new JButton("Create CIK");
+            JButton deleteCIKButton = new JButton("Delete CIK");
+
+            createCIKButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    String login = JOptionPane.showInputDialog(frame, "Enter new CIK login:");
+                    String password = JOptionPane.showInputDialog(frame, "Enter new CIK password:");
+
+                    if (login != null && !login.isEmpty() && password != null && !password.isEmpty()) {
+                        CIK newCIK = new CIK(generateUniqueId(ciks), login, password);
+                        ciks.add(newCIK);
+                        cikListModel.addElement(login);
+                        saveData();
+                    } else {
+                        JOptionPane.showMessageDialog(frame, "Login and password cannot be empty.", "Input Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
+
+            deleteCIKButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    int selectedIndex = cikList.getSelectedIndex();
+                    if (selectedIndex >= 0) {
+                        ciks.remove(selectedIndex);
+                        cikListModel.remove(selectedIndex);
+                        saveData();
+                    } else {
+                        JOptionPane.showMessageDialog(frame, "Please select a CIK to delete.", "Selection Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
+
+            JPanel buttonPanel = new JPanel();
+            buttonPanel.add(createCIKButton);
+            buttonPanel.add(deleteCIKButton);
+
+
+            frame.add(new JScrollPane(cikList), BorderLayout.CENTER);
+            frame.add(buttonPanel, BorderLayout.SOUTH);
+
+            frame.setVisible(true);
+        }
+
+        private void openManageCandidatesView() {
+             JFrame frame = new JFrame("Manage Candidates");
+            frame.setSize(600, 400);
+            frame.setLayout(new BorderLayout());
+
+            DefaultListModel<String> candidateListModel = new DefaultListModel<>();
+            JList<String> candidateList = new JList<>(candidateListModel);
+
+            for (Candidate candidate : candidates) {
+                candidateListModel.addElement(candidate.getLogin());
+            }
+
+            JButton deleteCandidateButton = new JButton("Delete Candidate");
+
+
+            deleteCandidateButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    int selectedIndex = candidateList.getSelectedIndex();
+                    if (selectedIndex >= 0) {
+                        candidates.remove(selectedIndex);
+                        candidateListModel.remove(selectedIndex);
+                        saveData();
+                    } else {
+                        JOptionPane.showMessageDialog(frame, "Please select a candidate to delete.", "Selection Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
+
+            JPanel buttonPanel = new JPanel();
+            buttonPanel.add(deleteCandidateButton);
+
+            frame.add(new JScrollPane(candidateList), BorderLayout.CENTER);
+            frame.add(buttonPanel, BorderLayout.SOUTH);
+
+            frame.setVisible(true);
+        }
+    }
+
+
+  static class CIKMenuView extends JFrame {
+        private User cikUser;
+
+        public CIKMenuView(User cikUser) {
+            this.cikUser = cikUser;
+            setTitle("CIK Menu");
+            setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            setSize(400, 300);
+            setLayout(new GridLayout(5, 1));
+
+            JButton createVotingButton = new JButton("Create Voting");
+            JButton addCandidateButton = new JButton("Add Candidate");
+            JButton printResultsButton = new JButton("Print Results (PDF)");
+            JButton groupResultsButton = new JButton("Group Results");
+            JButton sortResultsButton = new JButton("Sort Results");
+            JButton logoutButton = new JButton("Logout");
+
+
+            add(createVotingButton);
+            add(addCandidateButton);
+            add(printResultsButton);
+            add(groupResultsButton);
+            add(sortResultsButton);
+            add(logoutButton);
+
+            createVotingButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    openCreateVotingView();
+                }
+            });
+
+            addCandidateButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    openAddCandidateView();
+                }
+            });
+
+            printResultsButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    printVotingResults();
+                }
+            });
+            logoutButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    dispose();
+                    new LoginView().setVisible(true);
+                }
+            });
+
+            setVisible(true);
+            setLocationRelativeTo(null);
+        }
+
+       private void openCreateVotingView() {
+             JFrame frame = new JFrame("Create Voting");
+            frame.setSize(400, 200);
+            frame.setLayout(new GridLayout(3, 2));
+
+            JTextField descriptionField = new JTextField();
+            JFormattedTextField endDateField = new JFormattedTextField(createFormatter("####-##-## ##:##:##")); // YYYY-MM-DD HH:MM:SS
+
+            JButton createButton = new JButton("Create");
+
+            add(new JLabel("Description:"));
+            add(descriptionField);
+            add(new JLabel("End Date (YYYY-MM-DD HH:MM:SS):"));
+            add(endDateField);
+            add(createButton);
+
+            createButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                   try {
+                         String description = descriptionField.getText();
+                         String endDateStr = endDateField.getText();
+
+                         DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                         Date endDate = df.parse(endDateStr);
+
+                         if(description.isEmpty()){
+                                throw new IllegalArgumentException("All fields are required");
+                         }
+
+                        Voting newVoting = new Voting(generateUniqueId(votings), description, endDate, new ArrayList<>());
+                        votings.add(newVoting);
+                        saveData();
+
+                        JOptionPane.showMessageDialog(frame, "Voting created successfully!");
+                        frame.dispose();
+                    }
+                    catch (ParseException ex) {
+                        JOptionPane.showMessageDialog(frame, "Invalid date format. Use YYYY-MM-DD HH:MM:SS.", "Voting Creation Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                     catch (IllegalArgumentException ex) {
+                        JOptionPane.showMessageDialog(frame, ex.getMessage(), "Voting Creation Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
+
+            frame.setVisible(true);
+        }
+
+
+         private void openAddCandidateView() {
+            JFrame frame = new JFrame("Add Candidate");
+            frame.setSize(400, 200);
+            frame.setLayout(new GridLayout(4, 2));
+
+            JTextField loginField = new JTextField();
+            JPasswordField passwordField = new JPasswordField();
+            JButton addButton = new JButton("Add Candidate");
+
+            add(new JLabel("Login:"));
+            add(loginField);
+            add(new JLabel("Password:"));
+            add(passwordField);
+            add(addButton);
+
+
+            addButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    String login = loginField.getText();
+                    String password = new String(passwordField.getPassword());
+
+                    if (login != null && !login.isEmpty() && password != null && !password.isEmpty()) {
+                        Candidate newCandidate = new Candidate(generateUniqueId(candidates), login, password);
+                        candidates.add(newCandidate);
+                        saveData();
+                        JOptionPane.showMessageDialog(frame, "Candidate added successfully!");
+                        frame.dispose();
+                    } else {
+                        JOptionPane.showMessageDialog(frame, "Login and password cannot be empty.", "Input Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
+
+            frame.setVisible(true);
+        }
+
+        private void printVotingResults() {
+            JFrame frame = new JFrame("Print Voting Results");
+            frame.setSize(400, 300);
+            frame.setLayout(new BorderLayout());
+
+            DefaultListModel<String> votingListModel = new DefaultListModel<>();
+            JList<String> votingList = new JList<>(votingListModel);
+
+            for (Voting voting : votings) {
+                votingListModel.addElement(voting.getDescription());
+            }
+
+            JButton printButton = new JButton("Print Results");
+            JButton selectAllButton = new JButton("Select All");
+            JButton selectNoneButton = new JButton("Select None");
+
+
+            printButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                     List<Voting> selectedVotings = new ArrayList<>();
+                    for (int i : votingList.getSelectedIndices()) {
+                        selectedVotings.add(votings.get(i));
+                    }
+
+                   if (selectedVotings.isEmpty()) {
+                         JOptionPane.showMessageDialog(frame, "No votings selected.", "Selection Error", JOptionPane.ERROR_MESSAGE);
+                        return;
+                    }
+
+                    String fileName = JOptionPane.showInputDialog(frame, "Enter file name (or leave blank for timestamp):");
+                    boolean singleFile = selectedVotings.size() > 1 && JOptionPane.showConfirmDialog(frame, "Save all results into a single file?", "File Option", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION;
+
+                    String directoryPath = JOptionPane.showInputDialog(frame, "Enter directory path to save results (or leave blank for default):");
+                   //Construct file path
+                    String filePath;
+                    if (directoryPath == null || directoryPath.trim().isEmpty()) {
+                        filePath = (fileName == null || fileName.trim().isEmpty()) ? new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()) : fileName;
+                    } else {
+                        filePath = directoryPath + File.separator + ((fileName == null || fileName.trim().isEmpty()) ? new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()) : fileName);
+                    }
+                    try {
+                        if (singleFile) {
+                            generatePdfReport(selectedVotings, filePath + ".pdf");
+                            JOptionPane.showMessageDialog(frame, "Results saved to " + filePath + ".pdf");
+                        } else {
+                            for (Voting voting : selectedVotings) {
+                                generatePdfReport(Collections.singletonList(voting), filePath + "_" + voting.getId() + ".pdf");
+                                JOptionPane.showMessageDialog(frame, "Results saved to " + filePath + "_" + voting.getId() + ".pdf");
+                            }
+                        }
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(frame, "Error generating PDF: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
+
+            selectAllButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    votingList.setSelectionInterval(0, votings.size() - 1);
+                }
+            });
+
+            selectNoneButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    votingList.clearSelection();
+                }
+            });
+
+
+            JPanel buttonPanel = new JPanel();
+            buttonPanel.add(printButton);
+             buttonPanel.add(selectAllButton);
+            buttonPanel.add(selectNoneButton);
+
+            frame.add(new JScrollPane(votingList), BorderLayout.CENTER);
+            frame.add(buttonPanel, BorderLayout.SOUTH);
+            frame.setVisible(true);
+        }
+
+
+        private void generatePdfReport(List<Voting> selectedVotings, String filePath) throws IOException {
+             PdfWriter writer = new PdfWriter(filePath);
+            PdfDocument pdf = new PdfDocument(writer);
+            Document document = new Document(pdf);
+
+             for (Voting voting : selectedVotings) {
+                document.add(new Paragraph("Voting ID: " + voting.getId()));
+                document.add(new Paragraph("Description: " + voting.getDescription()));
+                document.add(new Paragraph("End Date: " + voting.getEndDate()));
+
+                Map<Integer, Integer> voteCounts = results.get(voting.getId());
+
+               if (voteCounts != null && !voteCounts.isEmpty()) {
+                        for (Map.Entry<Integer, Integer> entry : voteCounts.entrySet()) {
+                            int candidateId = entry.getKey();
+                            int votes = entry.getValue();
+                            document.add(new Paragraph("Candidate ID: " + candidateId + ", Votes: " + votes));
+                        }
+                    } else {
+                        document.add(new Paragraph("No results available for this voting."));
+                    }
+
+
+                document.add(new Paragraph("\n"));
+            }
+
+             document.close();
+        }
+    }
+
+
+   static class CandidateMenuView extends JFrame {
+        private User candidateUser;
+
+        public CandidateMenuView(User candidateUser) {
+            this.candidateUser = candidateUser;
+            setTitle("Candidate Menu");
+            setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            setSize(400, 300);
+            setLayout(new GridLayout(4, 1));
+
+            JButton fillDataButton = new JButton("Fill Data");
+            JButton previousResultsButton = new JButton("Previous Results");
+            JButton allVotingsButton = new JButton("All Votings");
+            JButton logoutButton = new JButton("Logout");
+
+            add(fillDataButton);
+            add(previousResultsButton);
+            add(allVotingsButton);
+            add(logoutButton);
+
+            // Implement action listeners for each button...
+            logoutButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    dispose();
+                    new LoginView().setVisible(true);
+                }
+            });
+
+            setVisible(true);
+            setLocationRelativeTo(null);
+        }
+    }
+
+
+   static class UserMenuView extends JFrame {
+        private User user;
+
+        public UserMenuView(User user) {
+            this.user = user;
+            setTitle("User Menu");
+            setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            setSize(400, 300);
+            setLayout(new GridLayout(4, 1));
+
+            JButton voteButton = new JButton("Vote");
+            JButton candidateListButton = new JButton("Candidate List");
+            JButton votingHistoryButton = new JButton("Voting History");
+            JButton logoutButton = new JButton("Logout");
+
+            add(voteButton);
+            add(candidateListButton);
+            add(votingHistoryButton);
+            add(logoutButton);
+
+            voteButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    openVotingView();
+                }
+            });
+
+             candidateListButton.addActionListener(new ActionListener() {
+                 @Override
+                 public void actionPerformed(ActionEvent e) {
+                     openCandidateListView();
+                 }
+             });
+
+            logoutButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    dispose();
+                    new LoginView().setVisible(
