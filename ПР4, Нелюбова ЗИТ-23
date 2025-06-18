@@ -1,0 +1,222 @@
+import .io.*;
+import java.sql.*;
+import java.util.*;
+
+public class ResultsAPI {
+
+    private static final String DB_URL = "jdbc:your_database_url"; // Replace with your actual DB URL
+    private static final String DB_USER = "your_db_user";        // Replace with your DB username
+    private static final String DB_PASSWORD = "your_db_password";   // Replace with your DB password
+
+    private static final Map<String, Object> readOnlyCache = new HashMap<>();
+
+    // ========================= Connection Management =========================
+
+    private static Connection getConnection() throws SQLException {
+        return DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+    }
+
+    // ========================= Data Loading =========================
+
+    public static Object loadData(String key, boolean readOnly) throws SQLException, IOException {
+        if (readOnly && readOnlyCache.containsKey(key)) {
+            return readOnlyCache.get(key);
+        }
+
+        Object data = fetchDataFromDB(key, readOnly); // Fetch from DB
+
+        if (readOnly) {
+            readOnlyCache.put(key, data); // Cache if read-only
+        }
+
+        return data;
+    }
+
+    private static Object fetchDataFromDB(String key, boolean readOnly) throws SQLException, IOException {
+        String query = "SELECT data, data_type FROM results_table WHERE key_name = ?";  // Replace with your actual table and column names
+        Object result = null;
+
+        try (Connection connection = getConnection();
+             PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+
+            preparedStatement.setString(1, key);
+            ResultSet resultSet = preparedStatement.executeQuery();
+
+            if (resultSet.next()) {
+                String dataType = resultSet.getString("data_type");  // Assuming a 'data_type' column exists to specify the type
+                switch (dataType.toLowerCase()) {
+                    case "integer":
+                        result = resultSet.getInt("data");
+                        break;
+                    case "string":
+                        result = resultSet.getString("data");
+                        break;
+                    case "list": // Example: loading a List of Strings
+                        String serializedList = resultSet.getString("data");
+                        result = deserializeList(serializedList); // Implement deserializeList()
+                        break;
+                    case "map": //Example: loading map
+                        String serializedMap = resultSet.getString("data");
+                         result = deserializeMap(serializedMap); // Implement deserializeMap()
+                         break;
+                    default:
+                        throw new IllegalArgumentException("Unsupported data type: " + dataType);
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Error fetching data from database for key " + key + ": " + e.getMessage());
+            throw e;
+        }
+
+        return result;
+    }
+
+    // ========================= Data Saving =========================
+
+    public static void saveData(String key, Object data, boolean readOnly) throws SQLException, IOException {
+        if (readOnly) {
+            throw new IllegalArgumentException("Cannot save data with read-only flag set to true.");
+        }
+
+        saveDataToDB(key, data);
+    }
+
+    private static void saveDataToDB(String key, Object data) throws SQLException, IOException {
+        String dataType = getDataType(data);  // Determine data type for the database
+
+        String query = "REPLACE INTO results_table (key_name, data, data_type) VALUES (?, ?, ?)"; // REPLACE is used for simplicity, assuming only one user.  Consider INSERT + ON DUPLICATE KEY UPDATE for concurrency.
+
+        try (Connection connection = getConnection();
+             PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+
+            preparedStatement.setString(1, key);
+
+            // Set the data based on its type
+            switch (dataType.toLowerCase()) {
+                case "integer":
+                    preparedStatement.setInt(2, (Integer) data);
+                    break;
+                case "string":
+                    preparedStatement.setString(2, (String) data);
+                    break;
+                case "list":
+                    String serializedList = serializeList((List<?>) data); // Implement serializeList()
+                    preparedStatement.setString(2, serializedList);
+                    break;
+                case "map": //Example
+                    String serializedMap = serializeMap((Map<?,?>) data); // Implement serializeMap()
+                    preparedStatement.setString(2, serializedMap);
+                    break;
+
+                default:
+                    throw new IllegalArgumentException("Unsupported data type: " + dataType);
+            }
+
+            preparedStatement.setString(3, dataType);
+
+            preparedStatement.executeUpdate();
+
+        } catch (SQLException e) {
+            System.err.println("Error saving data to database for key " + key + ": " + e.getMessage());
+            throw e;
+        }
+    }
+
+    // ========================= Data Type Handling =========================
+
+    private static String getDataType(Object data) {
+        if (data instanceof Integer) {
+            return "integer";
+        } else if (data instanceof String) {
+            return "string";
+        } else if (data instanceof List) {
+            return "list";
+        } else if (data instanceof Map){
+            return "map";
+        }
+        else {
+            throw new IllegalArgumentException("Unsupported data type: " + data.getClass().getName());
+        }
+    }
+
+    // ========================= Serialization/Deserialization (Example for List) =========================
+
+    // Example for List<String> - Adapt for other List types or use a general-purpose serialization library (e.g., Jackson, Gson)
+    private static String serializeList(List<?> list) throws IOException {
+        try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
+             ObjectOutputStream oos = new ObjectOutputStream(bos)) {
+            oos.writeObject(list);
+            return Base64.getEncoder().encodeToString(bos.toByteArray()); // Use Base64 to make it String
+        }
+    }
+
+    private static List<?> deserializeList(String serializedList) throws IOException {
+        try (ByteArrayInputStream bis = new ByteArrayInputStream(Base64.getDecoder().decode(serializedList));
+             ObjectInputStream ois = new ObjectInputStream(bis)) {
+            return (List<?>) ois.readObject();
+        } catch (ClassNotFoundException e) {
+            throw new IOException("Could not deserialize list", e);
+        }
+    }
+
+    private static String serializeMap(Map<?, ?> map) throws IOException {
+        try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
+             ObjectOutputStream oos = new ObjectOutputStream(bos)) {
+            oos.writeObject(map);
+            return Base64.getEncoder().encodeToString(bos.toByteArray()); // Use Base64 to make it String
+        }
+    }
+
+    private static Map<?, ?> deserializeMap(String serializedMap) throws IOException {
+        try (ByteArrayInputStream bis = new ByteArrayInputStream(Base64.getDecoder().decode(serializedMap));
+             ObjectInputStream ois = new ObjectInputStream(bis)) {
+            return (Map<?, ?>) ois.readObject();
+        } catch (ClassNotFoundException e) {
+            throw new IOException("Could not deserialize map", e);
+        }
+    }
+
+
+    // ========================= Example Usage =========================
+
+    public static void main(String[] args) {
+        try {
+            // Load a read-only value
+            String readOnlyResult = (String) loadData("config_setting", true);
+            System.out.println("Read-only value: " + readOnlyResult);
+
+            // Load a value that can be updated
+            Integer mutableResult = (Integer) loadData("vote_count", false);
+            System.out.println("Mutable value: " + mutableResult);
+
+            // Update the mutable value
+            if (mutableResult != null) {
+                mutableResult++;
+                saveData("vote_count", mutableResult, false);
+                System.out.println("Updated mutable value: " + mutableResult);
+            }
+
+            //Example of loading and saving a list
+            List<String> candidateList = new ArrayList<>();
+            candidateList.add("Candidate A");
+            candidateList.add("Candidate B");
+
+             saveData("candidate_list", candidateList, false);
+             List<String> loadedList = (List<String>) loadData("candidate_list", false);
+             System.out.println("Loaded candidate list: " + loadedList);
+
+             //Example of loading and saving a map
+             Map<String, Integer> votesMap = new HashMap<>();
+             votesMap.put("Candidate A", 10);
+             votesMap.put("Candidate B", 5);
+
+             saveData("votes_map", votesMap, false);
+             Map<String, Integer> loadedMap = (Map<String, Integer>) loadData("votes_map", false);
+             System.out.println("Loaded votes map: " + loadedMap);
+
+
+        } catch (SQLException | IOException e) {
+            System.err.println("An error occurred: " + e.getMessage());
+        }
+    }
+}
