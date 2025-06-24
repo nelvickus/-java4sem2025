@@ -1,0 +1,319 @@
+
+import .util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.Scanner;
+
+// Интерфейс врага
+interface Enemy {
+    String getName();
+
+    int getHealth();
+
+    int getAttackPower();
+
+    void attack(Player player);
+
+    void takeDamage(int damage);
+
+    boolean isAlive();
+
+    String getDescription(); // Добавлено описание врага
+}
+
+// Абстрактный класс фабрики врагов
+abstract class EnemyFactory {
+    public abstract Enemy createEnemy();
+}
+
+// Класс простого врага - гоблин
+class Goblin implements Enemy {
+    private String name;
+    private int health;
+    private int attackPower;
+    private boolean isAlive;
+    private String description = "Жадный и злобный гоблин.";
+
+    public Goblin(String name) {
+        this.name = name;
+        this.health = 50;
+        this.attackPower = 10;
+        this.isAlive = true;
+    }
+
+    @Override
+    public String getName() {
+        return name;
+    }
+
+    @Override
+    public int getHealth() {
+        return health;
+    }
+
+    @Override
+    public int getAttackPower() {
+        return attackPower;
+    }
+
+    @Override
+    public void attack(Player player) {
+        int damage = new Random().nextInt(attackPower);
+        System.out.println("Гоблин " + name + " наносит " + damage + " урона игроку!");
+        player.takeDamage(damage);
+    }
+
+    @Override
+    public void takeDamage(int damage) {
+        health -= damage;
+        System.out.println("Гоблину " + name + " нанесено " + damage + " урона!");
+        if (health <= 0) {
+            isAlive = false;
+            System.out.println("Гоблин " + name + " повержен!");
+        }
+    }
+
+    @Override
+    public boolean isAlive() {
+        return isAlive;
+    }
+
+    @Override
+    public String getDescription() {
+        return description;
+    }
+}
+
+// Класс фабрики гоблинов
+class GoblinFactory extends EnemyFactory {
+    private static int goblinCount = 1;
+
+    @Override
+    public Enemy createEnemy() {
+        return new Goblin("Гоблин №" + goblinCount++);
+    }
+}
+
+// Класс сложного врага - тролль
+class Troll implements Enemy {
+    private String name;
+    private int health;
+    private int attackPower;
+    private boolean isAlive;
+    private String description = "Огромный и сильный тролль.";
+
+    public Troll(String name) {
+        this.name = name;
+        this.health = 100;
+        this.attackPower = 20;
+        this.isAlive = true;
+    }
+
+    @Override
+    public String getName() {
+        return name;
+    }
+
+    @Override
+    public int getHealth() {
+        return health;
+    }
+
+    @Override
+    public int getAttackPower() {
+        return attackPower;
+    }
+
+    @Override
+    public void attack(Player player) {
+        int damage = new Random().nextInt(attackPower);
+        System.out.println("Тролль " + name + " наносит " + damage + " урона игроку!");
+        player.takeDamage(damage);
+    }
+
+    @Override
+    public void takeDamage(int damage) {
+        health -= damage;
+        System.out.println("Троллю " + name + " нанесено " + damage + " урона!");
+        if (health <= 0) {
+            isAlive = false;
+            System.out.println("Тролль " + name + " повержен!");
+        }
+    }
+
+    @Override
+    public boolean isAlive() {
+        return isAlive;
+    }
+
+    @Override
+    public String getDescription() {
+        return description;
+    }
+}
+
+// Класс фабрики троллей
+class TrollFactory extends EnemyFactory {
+    private static int trollCount = 1;
+
+    @Override
+    public Enemy createEnemy() {
+        return new Troll("Тролль №" + trollCount++);
+    }
+}
+
+// Класс игрока
+class Player {
+    private String name;
+    private int health;
+    private int attackPower;
+    private int potions;
+
+    public Player(String name) {
+        this.name = name;
+        this.health = 100;
+        this.attackPower = 15;
+        this.potions = 3;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public int getHealth() {
+        return health;
+    }
+
+    public int getAttackPower() {
+        return attackPower;
+    }
+
+    public int getPotions() {
+        return potions;
+    }
+
+    public void attack(Enemy enemy) {
+        int damage = new Random().nextInt(attackPower);
+        System.out.println("Игрок " + name + " наносит " + damage + " урона " + enemy.getName() + "!");
+        enemy.takeDamage(damage);
+    }
+
+    public void takeDamage(int damage) {
+        health -= damage;
+        System.out.println("Игроку " + name + " нанесено " + damage + " урона!");
+        if (health <= 0) {
+            System.out.println("Игрок " + name + " повержен!");
+        }
+    }
+
+    public void usePotion() {
+        if (potions > 0) {
+            health += 30;
+            if (health > 100) {
+                health = 100;
+            }
+            potions--;
+            System.out.println("Игрок " + name + " использует зелье и восстанавливает здоровье. Текущее здоровье: " + health + ", осталось зелий: " + potions);
+        } else {
+            System.out.println("У игрока " + name + " нет зелий!");
+        }
+    }
+
+    public boolean isAlive() {
+        return health > 0;
+    }
+}
+
+// Основной класс игры
+public class LabyrinthAdventure {
+
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
+        Random random = new Random();
+
+        System.out.println("Добро пожаловать в \"Поход по лабиринту\"!");
+        System.out.print("Введите имя вашего персонажа: ");
+        String playerName = scanner.nextLine();
+        Player player = new Player(playerName);
+
+        System.out.println("Привет, " + playerName + "! Вы начинаете свое приключение.");
+
+        EnemyFactory goblinFactory = new GoblinFactory();
+        EnemyFactory trollFactory = new TrollFactory();
+
+        List<EnemyFactory> enemyFactories = new ArrayList<>();
+        enemyFactories.add(goblinFactory);
+        enemyFactories.add(trollFactory);
+
+        // Главный цикл игры
+        while (player.isAlive()) {
+            System.out.println("\nВы находитесь в лабиринте. Что вы хотите сделать?");
+            System.out.println("1. Идти дальше");
+            System.out.println("2. Использовать зелье (" + player.getPotions() + " осталось)");
+            System.out.println("3. Сдаться");
+            System.out.print("Ваш выбор: ");
+            int choice = scanner.nextInt();
+            scanner.nextLine(); // Consume newline
+
+            switch (choice) {
+                case 1:
+                    // Случайная встреча с врагом
+                    if (random.nextDouble() < 0.7) {
+                        EnemyFactory selectedFactory = enemyFactories.get(random.nextInt(enemyFactories.size()));
+                        Enemy enemy = selectedFactory.createEnemy();
+                        System.out.println("\nВы встретили врага! " + enemy.getName() + ". " + enemy.getDescription());
+
+                        // Боевой цикл
+                        while (player.isAlive() && enemy.isAlive()) {
+                            System.out.println("\n-- Бой --");
+                            System.out.println("Ваше здоровье: " + player.getHealth());
+                            System.out.println("Здоровье " + enemy.getName() + ": " + enemy.getHealth());
+                            System.out.println("1. Атаковать");
+                            System.out.println("2. Использовать зелье (" + player.getPotions() + " осталось)");
+                            System.out.println("3. Бежать");
+                            System.out.print("Ваш выбор: ");
+                            int battleChoice = scanner.nextInt();
+                            scanner.nextLine(); // Consume newline
+
+                            switch (battleChoice) {
+                                case 1:
+                                    player.attack(enemy);
+                                    if (enemy.isAlive()) {
+                                        enemy.attack(player);
+                                    }
+                                    break;
+                                case 2:
+                                    player.usePotion();
+                                    break;
+                                case 3:
+                                    System.out.println("Вы убежали от врага!");
+                                    break;
+                                default:
+                                    System.out.println("Неверный выбор.");
+                            }
+                        }
+
+                        if (!player.isAlive()) {
+                            System.out.println("Вы проиграли!");
+                            break;
+                        } else if (!enemy.isAlive()) {
+                            System.out.println("Вы победили " + enemy.getName() + "!");
+                        }
+                    } else {
+                        System.out.println("Вы прошли дальше и ничего не встретили.");
+                    }
+                    break;
+                case 2:
+                    player.usePotion();
+                    break;
+                case 3:
+                    System.out.println("Вы сдались. Игра окончена.");
+                    return;
+                default:
+                    System.out.println("Неверный выбор.");
+            }
+        }
+
+        System.out.println("Спасибо за игру!");
+    }
+}
